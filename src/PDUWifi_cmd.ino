@@ -55,6 +55,7 @@ bool channelStates[4] = { false, false, false, false }; // CH1, CH2, CH3, CH4
 bool relayState = false;                  // Relay state
 int ch1ResetCount = 0;                    // Counter for CH1 resets
 unsigned long lastResetTime = 0;          // Time of last reset
+unsigned long shortlastResetTime = 0;          // Time of last reset
 float currentTemp = 0.0;                  // Current temperature
 float batteryVoltage = 0.0;               // Battery voltage
 unsigned long ignLowStartTime = 0;        // Time when IGN went LOW
@@ -764,15 +765,15 @@ void loop() {
                 Serial.println("Short circuit detected! VP_PIN is HIGH");
                 Serial.println("CH1 State: " + String(channelStates[0] ? "ON" : "OFF"));
                 Serial.println("VP_PIN State: " + String(digitalRead(VP_PIN)));
-                Serial.println("Last reset time: " + String(lastResetTime));
+                Serial.println("Last reset time: " + String(shortlastResetTime));
                 Serial.println("Current reset count: " + String(ch1ResetCount));
                 firstDetection = false;
             }
             
             // Only count as a new reset attempt if more than 30 seconds has passed
-            if (currentTime - lastResetTime >= 3000) {  // 30 seconds = 30000ms
+            if (currentTime - shortlastResetTime >= 30000) {  // 30 seconds = 30000ms
                 ch1ResetCount++;
-                lastResetTime = currentTime;
+                shortlastResetTime = currentTime;
                 
                 Serial.println("Starting reset sequence...");
                 Serial.println("Reset attempt #" + String(ch1ResetCount));
@@ -783,7 +784,7 @@ void loop() {
                     digitalWrite(CH1_PIN, HIGH);  // Turn OFF
                     delay(30000);  // Wait 30 seconds
                     
-                    if (ch1ResetCount < 3) {  // Only turn back on if not the last attempt
+                    if (ch1ResetCount <= 3) {  // Only turn back on if not the last attempt
                         Serial.println("Turning CH1 back ON after 30s wait");
                         digitalWrite(CH1_PIN, LOW);   // Turn back ON
                     }
@@ -797,7 +798,7 @@ void loop() {
                     Serial.println("Edge problem persists after 3 reset attempts - CH1 disabled");
                 }
             } else {
-                Serial.println("Waiting for timeout: " + String((30000 - (currentTime - lastResetTime))/1000) + " seconds remaining");
+                //Serial.println("Waiting for timeout: " + String((30000 - (currentTime - shortlastResetTime))/1000) + " seconds remaining");
             }
         } else {
             firstDetection = true;  // Reset the first detection flag when VP_PIN goes LOW
