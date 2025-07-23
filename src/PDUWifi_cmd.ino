@@ -671,7 +671,7 @@ void handleApiSetTime() {
 }
 void lastStatus();
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(9600);
     sensors.begin();
 
     pinMode(F1_PIN, INPUT);
@@ -679,7 +679,7 @@ void setup() {
     pinMode(F3_PIN, INPUT);
     pinMode(F4_PIN, INPUT);
     pinMode(IGN_PIN, INPUT);
-    pinMode(VP_PIN, INPUT);
+    pinMode(VP_PIN, INPUT_PULLDOWN);  // Use pulldown to ensure clean LOW when not active
     pinMode(CH1_PIN, OUTPUT);
     pinMode(CH2_PIN, OUTPUT);
     pinMode(CH3_PIN, OUTPUT);
@@ -737,30 +737,70 @@ void loop() {
     // Read and debounce IGN state
     int ignState = debounce(IGN_PIN);
 
+    // Periodic debug output (every 2 seconds)
+    static unsigned long lastDebugTime = 0;
+    if (millis() - lastDebugTime >= 2000) {
+        Serial.println("Debug Status:");
+        Serial.println("CH1 State (channelStates[0]): " + String(channelStates[0] ? "ON" : "OFF"));
+        Serial.println("CH1_PIN Value: " + String(digitalRead(CH1_PIN)));
+        Serial.println("VP_PIN Value: " + String(digitalRead(VP_PIN)));
+        lastDebugTime = millis();
+    }
+
     // Check for edge problem through VP pin when CH1 is ON
-    if (channelStates[0]) {  // If CH1 is ON
+    static bool firstDetection = true;  // Flag for first detection
+    
+    if (!channelStates[0]) {  // If CH1 is ON
+      //  // Double check the actual pin state
+      //  if (digitalRead(CH1_PIN) == HIGH) {
+      //      Serial.println("WARNING: CH1_PIN is HIGH but channelStates[0] is ON - fixing...");
+      //      digitalWrite(CH1_PIN, LOW);  // Force it LOW (ON)
+      //  }
+        
         if (digitalRead(VP_PIN)) { // If problem detected (HIGH)
             unsigned long currentTime = millis();
             
+            if (firstDetection) {
+                Serial.println("Short circuit detected! VP_PIN is HIGH");
+                Serial.println("CH1 State: " + String(channelStates[0] ? "ON" : "OFF"));
+                Serial.println("VP_PIN State: " + String(digitalRead(VP_PIN)));
+                Serial.println("Last reset time: " + String(lastResetTime));
+                Serial.println("Current reset count: " + String(ch1ResetCount));
+                firstDetection = false;
+            }
+            
             // Only count as a new reset attempt if more than 30 seconds has passed
-            if (currentTime - lastResetTime >= 30000) {  // 30 seconds = 30000ms
+            if (currentTime - lastResetTime >= 3000) {  // 30 seconds = 30000ms
                 ch1ResetCount++;
                 lastResetTime = currentTime;
                 
+                Serial.println("Starting reset sequence...");
+                Serial.println("Reset attempt #" + String(ch1ResetCount));
+                
                 if (ch1ResetCount <= 3) {
                     // Reset the middle chip by cycling CH1
+                    Serial.println("Turning CH1 OFF for 30 seconds...");
                     digitalWrite(CH1_PIN, HIGH);  // Turn OFF
                     delay(30000);  // Wait 30 seconds
-                    digitalWrite(CH1_PIN, LOW);   // Turn back ON
+                    
+                    if (ch1ResetCount < 3) {  // Only turn back on if not the last attempt
+                        Serial.println("Turning CH1 back ON after 30s wait");
+                        digitalWrite(CH1_PIN, LOW);   // Turn back ON
+                    }
                     Serial.println("Edge problem detected - CH1 reset performed after 30s wait (Attempt " + String(ch1ResetCount) + " of 3)");
                 } else {
                     // After 3 attempts, turn off CH1 and log the failure
+                    Serial.println("Maximum reset attempts reached (3)");
                     digitalWrite(CH1_PIN, HIGH);  // Turn OFF permanently
                     channelStates[0] = false;     // Update channel state
                     saveSettings();               // Save the new state
                     Serial.println("Edge problem persists after 3 reset attempts - CH1 disabled");
                 }
+            } else {
+                Serial.println("Waiting for timeout: " + String((30000 - (currentTime - lastResetTime))/1000) + " seconds remaining");
             }
+        } else {
+            firstDetection = true;  // Reset the first detection flag when VP_PIN goes LOW
         }
     }
 
