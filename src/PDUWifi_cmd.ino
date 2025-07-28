@@ -50,7 +50,7 @@ const unsigned long CH_ACTIVATE_DELAY = 10000;  // 3000ms before other channels
 const unsigned long RELAY_DELAY = 50;           // 50ms after relay on
 // State variables
 bool systemOn = false;
-bool channelStates[4] = { false, false, false, false };  // CH1, CH2, CH3, CH4
+bool channelStates[4] = { true, true, true, true };  // CH1, CH2, CH3, CH4
 bool relayState = false;                                 // Relay state
 float currentTemp = 0.0;                                 // Current temperature
 int vpResetAttempts = 0;                                // Counter for VP_PIN reset attempts
@@ -71,10 +71,6 @@ WebServer server(80);
 static bool firstRun = true;
 void on_sequance() {
     // Start with all channels off
-    digitalWrite(CH1_PIN, HIGH);
-    digitalWrite(CH2_PIN, HIGH);
-    digitalWrite(CH3_PIN, HIGH);
-    digitalWrite(CH4_PIN, HIGH);
     digitalWrite(RELAY_PIN, HIGH);  // Turn on relay
     delay(RELAY_DELAY);             // Wait 50ms
 
@@ -830,8 +826,10 @@ void loop() {
         off_sequance();
       }
       relayState = false;
-    } else if (ignState) {
+    } else if (ignState == HIGH) {  // Check specifically for HIGH state
+      // Turn on if IGN is HIGH and conditions are good
       if (!relayState) {
+        Serial.println("IGN is HIGH, running on_sequance");
         on_sequance();
       }
       relayState = true;
