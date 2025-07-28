@@ -67,50 +67,26 @@ const unsigned long debounceDelay = 150;                 // Debounce period (ms)
 
 // Web server
 WebServer server(80);
-// Add static variable to track first run
-static bool firstRun = true;
 void on_sequance() {
     // Start with all channels off
     digitalWrite(RELAY_PIN, HIGH);  // Turn on relay
     delay(RELAY_DELAY);             // Wait 50ms
 
-    if (firstRun) {
-        // On first run, we still need CH1 edge control sequence if it's meant to be ON
-        if (channelStates[0]) {  // Only if CH1 should be ON
-            digitalWrite(CH1_PIN, LOW);   // Turn on CH1
-            delay(CH1_PULSE);             // Wait 100ms
-            digitalWrite(CH1_PIN, HIGH);  // Turn off CH1
-            delay(CH1_OFF_TIME);          // Wait 50ms
-            digitalWrite(CH1_PIN, LOW);   // Turn on CH1 again
-        }
-
-        delay(CH_ACTIVATE_DELAY);  // Wait 3000ms
-
-        // Turn on other channels according to their saved states
-        if (channelStates[1]) digitalWrite(CH2_PIN, LOW);
-        if (channelStates[2]) digitalWrite(CH3_PIN, LOW);
-        if (channelStates[3]) digitalWrite(CH4_PIN, LOW);
-        
-        firstRun = false;  // Mark first run as complete
-        saveSettings();    // Save firstRun state
-  } else {
-    // Subsequent runs - check channel states
-    if (channelStates[0]) {  // If CH1 should be ON
-      // CH1 edge control sequence
-      digitalWrite(CH1_PIN, LOW);   // Turn on CH1
-      delay(CH1_PULSE);             // Wait 100ms
-      digitalWrite(CH1_PIN, HIGH);  // Turn off CH1
-      delay(CH1_OFF_TIME);          // Wait 50ms
-      digitalWrite(CH1_PIN, LOW);   // Turn on CH1 again
-      
-      delay(CH_ACTIVATE_DELAY);  // Wait 5 seconds before turning on other channels
-    }
+    // Always perform CH1 edge control sequence
+    digitalWrite(CH1_PIN, LOW);   // Turn on CH1
+    delay(CH1_PULSE);            // Wait 100ms
+    digitalWrite(CH1_PIN, HIGH);  // Turn off CH1
+    delay(CH1_OFF_TIME);         // Wait 50ms
+    digitalWrite(CH1_PIN, LOW);   // Turn on CH1 again
     
-    // Turn on only the channels that should be ON
-    if (channelStates[1]) digitalWrite(CH2_PIN, LOW);
-    if (channelStates[2]) digitalWrite(CH3_PIN, LOW);
-    if (channelStates[3]) digitalWrite(CH4_PIN, LOW);
-  }
+    delay(CH_ACTIVATE_DELAY);    // Wait before turning on other channels
+
+    // Turn on all other channels
+    digitalWrite(CH2_PIN, LOW);
+    digitalWrite(CH3_PIN, LOW);
+    digitalWrite(CH4_PIN, LOW);
+
+    Serial.println("Full sequence completed: CH1 edge control + other channels");
 }
 
 void off_sequance() {
@@ -141,9 +117,6 @@ void saveSettings() {
   // Save relay flag
   preferences.putBool("relayFlag", RelayFlag);
 
-  // Save first run state
-  preferences.putBool("firstRun", firstRun);
-
   // Close the preferences namespace
   preferences.end();
 
@@ -171,9 +144,6 @@ void loadSettings() {
 
     // Load relay flag
     RelayFlag = preferences.getBool("relayFlag", true);
-
-    // Load first run state
-    firstRun = preferences.getBool("firstRun", true);
 
     Serial.println("Settings loaded from flash memory");
     Serial.println("Temperature threshold: " + String(tempThreshold));
