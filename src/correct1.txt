@@ -55,7 +55,7 @@ bool relayState = false;                                 // Relay state
 float currentTemp = 0.0;                                 // Current temperature
 int vpResetAttempts = 0;                                // Counter for VP_PIN reset attempts
 unsigned long lastVpResetTime = 0;                       // Time of last VP reset attempt
-const int MAX_VP_RESETS = 4;                            // Maximum number of VP reset attempts
+const int MAX_VP_RESETS = 3;                            // Maximum number of VP reset attempts
 float batteryVoltage = 0.0;                              // Battery voltage
 unsigned long ignLowStartTime = 0;                       // Time when IGN went LOW
 bool RelayFlag = true;                                   // Relay control flag
@@ -67,54 +67,23 @@ const unsigned long debounceDelay = 150;                 // Debounce period (ms)
 
 // Web server
 WebServer server(80);
-// Add static variable to track first run
-static bool firstRun = true;
 void on_sequance() {
-    // Start with all channels off
-    digitalWrite(CH1_PIN, HIGH);
-    digitalWrite(CH2_PIN, HIGH);
-    digitalWrite(CH3_PIN, HIGH);
-    digitalWrite(CH4_PIN, HIGH);
-    digitalWrite(RELAY_PIN, HIGH);  // Turn on relay
-    delay(RELAY_DELAY);             // Wait 50ms
+  digitalWrite(RELAY_PIN, HIGH);  // Turn on relay
+  delay(RELAY_DELAY);             // Wait 50ms
 
-    if (firstRun) {
-        // On first run, we still need CH1 edge control sequence if it's meant to be ON
-        if (channelStates[0]) {  // Only if CH1 should be ON
-            digitalWrite(CH1_PIN, LOW);   // Turn on CH1
-            delay(CH1_PULSE);             // Wait 100ms
-            digitalWrite(CH1_PIN, HIGH);  // Turn off CH1
-            delay(CH1_OFF_TIME);          // Wait 50ms
-            digitalWrite(CH1_PIN, LOW);   // Turn on CH1 again
-        }
+  // CH1 edge control sequence
+  digitalWrite(CH1_PIN, LOW);   // Turn on CH1
+  delay(CH1_PULSE);             // Wait 100ms
+  digitalWrite(CH1_PIN, HIGH);  // Turn off CH1
+  delay(CH1_OFF_TIME);          // Wait 50ms
+  digitalWrite(CH1_PIN, LOW);   // Turn on CH1 again
 
-        delay(CH_ACTIVATE_DELAY);  // Wait 3000ms
+  delay(CH_ACTIVATE_DELAY);  // Wait 3000ms
 
-        // Turn on other channels according to their saved states
-        if (channelStates[1]) digitalWrite(CH2_PIN, LOW);
-        if (channelStates[2]) digitalWrite(CH3_PIN, LOW);
-        if (channelStates[3]) digitalWrite(CH4_PIN, LOW);
-        
-        firstRun = false;  // Mark first run as complete
-        saveSettings();    // Save firstRun state
-  } else {
-    // Subsequent runs - check channel states
-    if (channelStates[0]) {  // If CH1 should be ON
-      // CH1 edge control sequence
-      digitalWrite(CH1_PIN, LOW);   // Turn on CH1
-      delay(CH1_PULSE);             // Wait 100ms
-      digitalWrite(CH1_PIN, HIGH);  // Turn off CH1
-      delay(CH1_OFF_TIME);          // Wait 50ms
-      digitalWrite(CH1_PIN, LOW);   // Turn on CH1 again
-      
-      delay(CH_ACTIVATE_DELAY);  // Wait 5 seconds before turning on other channels
-    }
-    
-    // Turn on only the channels that should be ON
-    if (channelStates[1]) digitalWrite(CH2_PIN, LOW);
-    if (channelStates[2]) digitalWrite(CH3_PIN, LOW);
-    if (channelStates[3]) digitalWrite(CH4_PIN, LOW);
-  }
+  // Turn on other channels
+  digitalWrite(CH2_PIN, LOW);
+  digitalWrite(CH3_PIN, LOW);
+  digitalWrite(CH4_PIN, LOW);
 }
 
 void off_sequance() {
@@ -145,9 +114,6 @@ void saveSettings() {
   // Save relay flag
   preferences.putBool("relayFlag", RelayFlag);
 
-  // Save first run state
-  preferences.putBool("firstRun", firstRun);
-
   // Close the preferences namespace
   preferences.end();
 
@@ -176,9 +142,6 @@ void loadSettings() {
     // Load relay flag
     RelayFlag = preferences.getBool("relayFlag", true);
 
-    // Load first run state
-    firstRun = preferences.getBool("firstRun", true);
-
     Serial.println("Settings loaded from flash memory");
     Serial.println("Temperature threshold: " + String(tempThreshold));
     Serial.println("Time threshold: " + String(timeThreshold / 60000.0) + " minutes");
@@ -198,6 +161,16 @@ void loadSettings() {
 
   // Close the preferences namespace
   preferences.end();
+}
+
+// Apply saved channel states to hardware
+void applyChannelStates() {
+  // Set pins according to saved states
+  // Remember LOW is ON, HIGH is OFF for channels
+  digitalWrite(CH1_PIN, channelStates[0] ? LOW : HIGH);
+  digitalWrite(CH2_PIN, channelStates[1] ? LOW : HIGH);
+  digitalWrite(CH3_PIN, channelStates[2] ? LOW : HIGH);
+  digitalWrite(CH4_PIN, channelStates[3] ? LOW : HIGH);
 }
 
 // Debounce function for IGN pin
@@ -682,7 +655,7 @@ void handleApiSetTime() {
 }
 void lastStatus();
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   sensors.begin();
 
   pinMode(F1_PIN, INPUT);
@@ -720,6 +693,9 @@ void setup() {
   // Load settings from flash
   loadSettings();
 
+  // Apply saved channel states
+  applyChannelStates();
+
   // Start Access Point
   WiFi.softAP(apSSID, apPassword);
   IPAddress IP = WiFi.softAPIP();
@@ -745,66 +721,26 @@ void loop() {
   // Read and debounce IGN state
   int ignState = debounce(IGN_PIN);
   
-  // Debug: Print VP_PIN and CH1_PIN states every loop
-  static int lastVpPinState = -1;
-  static int lastCh1PinState = -1;
-  int currentVpPin = digitalRead(VP_PIN);
-  int currentCh1Pin = digitalRead(CH1_PIN);
-  
-  // Only print if states have changed
-  if (currentVpPin != lastVpPinState || currentCh1Pin != lastCh1PinState) {
-    Serial.println("Status Update:");
-    Serial.println("VP_PIN State: " + String(currentVpPin ? "HIGH (Fault)" : "LOW (Normal)"));
-    Serial.println("CH1_PIN State: " + String(currentCh1Pin ? "HIGH (OFF)" : "LOW (ON)"));
-    Serial.println("Current Reset Attempts: " + String(vpResetAttempts));
-    lastVpPinState = currentVpPin;
-    lastCh1PinState = currentCh1Pin;
-  }
-  
-  // VP_PIN fault handling for CH1 only
-  if (!digitalRead(CH1_PIN)) {  // If CH1 is ON (LOW)
-    if (digitalRead(VP_PIN) == HIGH) {  // Fault detected
-      static bool faultHandlingInProgress = false;
+  // VP_PIN fault handling
+  if (digitalRead(VP_PIN) == HIGH) {  // Fault detected
+    if (vpResetAttempts < MAX_VP_RESETS && (millis() - lastVpResetTime >= 30000)) {  // Wait 30 seconds between attempts
+      // Try reset sequence
+      off_sequance();
+      delay(1000);  // Wait 1 second
+      on_sequance();
       
-      if (!faultHandlingInProgress && vpResetAttempts < MAX_VP_RESETS) {
-        faultHandlingInProgress = true;
-        Serial.println("FAULT DETECTED: VP_PIN is HIGH while CH1 is ON");
-        
-        // Immediately turn CH1 OFF
-        digitalWrite(CH1_PIN, HIGH);
-        Serial.println("CH1 turned OFF, waiting 30 seconds before reset...");
-        
-        // Wait 30 seconds
-        delay(30000);
-        
-        // Turn CH1 back ON
-        digitalWrite(CH1_PIN, LOW);
-        Serial.println("CH1 turned back ON");
-        
-        // Increment reset counter
-        vpResetAttempts++;
-        Serial.println("Reset attempt " + String(vpResetAttempts) + " of " + String(MAX_VP_RESETS));
-        
-        faultHandlingInProgress = false;
-      }
-      
-      // If we've reached max attempts, permanently disable CH1
-      if (vpResetAttempts >= MAX_VP_RESETS) {
-        Serial.println("CRITICAL: Maximum reset attempts reached!");
-        // Permanent shutdown of CH1
-        digitalWrite(CH1_PIN, HIGH);
-        channelStates[0] = false;  // Update channel state
-        saveSettings();  // Save to flash
-        Serial.println("VP fault: Maximum reset attempts reached. CH1 locked and saved to flash memory.");
-        Serial.println("Manual intervention required to reset CH1");
-      }
-    } else {
-      // If CH1 is ON but VP_PIN is LOW (normal operation)
-      static unsigned long lastNormalOpTime = 0;
-      if (millis() - lastNormalOpTime >= 50000) {  // Print every 5 seconds during normal operation
-        Serial.println("Normal Operation: CH1 is ON, VP_PIN is LOW (no fault)");
-        lastNormalOpTime = millis();
-      }
+      vpResetAttempts++;
+      lastVpResetTime = millis();
+      Serial.println("VP fault detected. Reset attempt " + String(vpResetAttempts) + " of " + String(MAX_VP_RESETS));
+    } else if (vpResetAttempts >= MAX_VP_RESETS) {
+      // Permanent shutdown after max attempts
+      off_sequance();
+      relayState = false;
+      Serial.println("VP fault: Maximum reset attempts reached. System locked.");
+    }
+  } else {  // No fault - reset counter after 30 seconds of normal operation
+    if (millis() - lastVpResetTime >= 30000) {
+      vpResetAttempts = 0;
     }
   }
 
