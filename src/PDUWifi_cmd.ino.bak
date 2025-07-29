@@ -1,15 +1,24 @@
 /*
  Name:		PDUWifiFixRefreshWithPreferences.ino
- Created:	5/7/2025 12:59:48 PM
+ Created:	5/7/    int lastStableState = LOW;                               // Last stable IGN state
+const unsigned long debounceDelay = 150;                 // Debounce period (ms)
+
+#include "pdu_web_server.h"
+#include "SerialCommandHandler.h"
+
+PDUController pdu;
+PDUWebServer webServer(pdu);
+
+void on_sequance() {2:59:48 PM
  Author:	ahmed ellamie
  Modified:  5/8/2025 - Added Preferences storage for settings
+           7/28/2025 - Refactored to modular code structure
 */
 
 #include <WiFi.h>
 #include <WebServer.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include <Preferences.h>
+#include "pdu_controller.h"
+#include "pdu_config.h"
 
 // Access Point credentials
 const char* apSSID = "TAT_PDU_AP";
@@ -181,12 +190,45 @@ int debounce(int pin) {
   return lastStableState;
 }
 
-void handleRoot() {
-  if (!server.authenticate(http_username, http_password)) {
-    return server.requestAuthentication();
-  }
+#include "pdu_web_server.h"
+#include "SerialCommandHandler.h"
 
-  String html = R"=====(
+PDUController pdu;
+PDUWebServer webServer(pdu);
+        int spaceIndex = command.indexOf(' ');
+        if (spaceIndex <= 0) {
+            Serial.println("Invalid command format");
+            return;
+        }
+
+        String cmd = command.substring(0, spaceIndex);
+        String valueStr = command.substring(spaceIndex + 1);
+        int value = valueStr.toInt();
+
+        if (cmd.startsWith("SET_CH") && cmd.length() == 7) {
+            int channel = cmd[6] - '0';
+            if (channel >= 1 && channel <= 4) {
+                pdu.setChannel(channel, value == 0);
+                Serial.println(cmd.substring(4) + ":" + String(pdu.getChannelState(channel) ? "1" : "0"));
+            }
+        }
+        else if (cmd == "SET_RELAY") {
+            pdu.setRelayFlag(value == 1);
+            Serial.println("RELAY:" + String(pdu.getRelayFlag() ? "1" : "0"));
+        }
+        else if (cmd == "SET_TSTemp") {
+            pdu.setTempThreshold(value);
+            Serial.println("TSTEMP:" + String(pdu.getTempThreshold()));
+        }
+        else if (cmd == "SET_TSTime") {
+            pdu.setTimeThreshold(value * 60000);
+            Serial.println("TSTOFF:" + String(value));
+        }
+        else {
+            Serial.println("Unknown command");
+        }
+    }
+};
 <!DOCTYPE html>
 <html>
 <head>
@@ -648,43 +690,9 @@ void handleApiSetTime() {
 }
 void lastStatus();
 void setup() {
-  Serial.begin(9600);
-  sensors.begin();
-
-  pinMode(F1_PIN, INPUT);
-  pinMode(F2_PIN, INPUT);
-  pinMode(F3_PIN, INPUT);
-  pinMode(F4_PIN, INPUT);
-  pinMode(IGN_PIN, INPUT);
-  pinMode(VP_PIN, INPUT);
-  pinMode(CH1_PIN, OUTPUT);
-  pinMode(CH2_PIN, OUTPUT);
-  pinMode(CH3_PIN, OUTPUT);
-  pinMode(CH4_PIN, OUTPUT);
-  pinMode(RELAY_PIN, OUTPUT);
-
-  // Initialize all channels to HIGH (OFF) temporarily
-  digitalWrite(CH1_PIN, HIGH);
-  digitalWrite(CH2_PIN, HIGH);
-  digitalWrite(CH3_PIN, HIGH);
-  digitalWrite(CH4_PIN, HIGH);
-  digitalWrite(RELAY_PIN, LOW);
-  /*
-    delay(2000);
-    digitalWrite(CH1_PIN, HIGH);
-    digitalWrite(CH2_PIN, HIGH);
-    digitalWrite(CH3_PIN, HIGH);
-    digitalWrite(CH4_PIN, HIGH);
-    digitalWrite(RELAY_PIN, LOW);
-    delay(2000);
-    digitalWrite(CH1_PIN, LOW);
-    digitalWrite(CH2_PIN, LOW);
-    digitalWrite(CH3_PIN, LOW);
-    digitalWrite(CH4_PIN, LOW);
-    digitalWrite(RELAY_PIN, HIGH);
-    */
-  // Load settings from flash
-  loadSettings();
+    Serial.begin(9600);
+    pdu.begin();
+    webServer.begin();
 
   // Start Access Point
   WiFi.softAP(apSSID, apPassword);
@@ -706,10 +714,15 @@ void setup() {
 }
 
 void loop() {
-  server.handleClient();
+    webServer.handleClient();
+    pdu.update();
 
-  // Read and debounce IGN state
-  int ignState = debounce(IGN_PIN);
+    // Handle serial commands
+    if (Serial.available() > 0) {
+        String command = Serial.readStringUntil('\n');
+        command.trim();
+        SerialCommandHandler::handleCommand(command, pdu);
+    }
   
   // Debug: Print VP_PIN and CH1_PIN states every loop
   static int lastVpPinState = -1;
@@ -821,136 +834,4 @@ void loop() {
       ignLowStartTime = millis();
     }
   }
-  // Check for incoming serial commands
-  if (Serial.available() > 0) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-
-    // Handle GET commands
-    if (command == "GET_F1") {
-      Serial.print("F1:");
-      Serial.println(digitalRead(F1_PIN));
-    } else if (command == "GET_F2") {
-      Serial.print("F2:");
-      Serial.println(digitalRead(F2_PIN));
-    } else if (command == "GET_F3") {
-      Serial.print("F3:");
-      Serial.println(digitalRead(F3_PIN));
-    } else if (command == "GET_F4") {
-      Serial.print("F4:");
-      Serial.println(digitalRead(F4_PIN));
-    } else if (command == "GET_IGN") {
-      Serial.print("IGN:");
-      Serial.println(digitalRead(IGN_PIN));
-    } else if (command == "GET_TEMP") {
-      Serial.print("TEMP:");
-      Serial.println(currentTemp, 2);
-    } else if (command == "GET_BAT") {
-      Serial.print("BAT:");
-      Serial.println(batteryVoltage, 2);
-    } else if (command == "GET_CH1") {
-      Serial.print("CH1:");
-      Serial.println(channelStates[0] ? "1" : "0");
-    } else if (command == "GET_CH2") {
-      Serial.print("CH2:");
-      Serial.println(channelStates[1] ? "1" : "0");
-    } else if (command == "GET_CH3") {
-      Serial.print("CH3:");
-      Serial.println(channelStates[2] ? "1" : "0");
-    } else if (command == "GET_CH4") {
-      Serial.print("CH4:");
-      Serial.println(channelStates[3] ? "1" : "0");
-    } else if (command == "GET_RELAY") {
-      Serial.print("RELAY:");
-      Serial.println(RelayFlag ? "1" : "0");
-    } else if (command == "GET_STATUS") {
-      lastStatus();
-    }
-    // Handle SET commands
-    else {
-      int spaceIndex = command.indexOf(' ');
-      if (spaceIndex > 0) {
-        String cmd = command.substring(0, spaceIndex);
-        String valueStr = command.substring(spaceIndex + 1);
-        int value = valueStr.toInt();
-
-        if (cmd == "SET_CH1") {
-          channelStates[0] = (value == 0);
-          digitalWrite(CH1_PIN, value);
-          saveSettings();
-          Serial.print("CH1:");
-          Serial.println(channelStates[0] ? "1" : "0");
-        } else if (cmd == "SET_CH2") {
-          channelStates[1] = (value == 0);
-          digitalWrite(CH2_PIN, value);
-          saveSettings();
-          Serial.print("CH2:");
-          Serial.println(channelStates[1] ? "1" : "0");
-        } else if (cmd == "SET_CH3") {
-          channelStates[2] = (value == 0);
-          digitalWrite(CH3_PIN, value);
-          saveSettings();
-          Serial.print("CH3:");
-          Serial.println(channelStates[2] ? "1" : "0");
-        } else if (cmd == "SET_CH4") {
-          channelStates[3] = (value == 0);
-          digitalWrite(CH4_PIN, value);
-          saveSettings();
-          Serial.print("CH4:");
-          Serial.println(channelStates[3] ? "1" : "0");
-        } else if (cmd == "SET_RELAY") {
-          RelayFlag = (value == 1);
-          saveSettings();
-          Serial.print("RELAY:");
-          Serial.println(RelayFlag ? "1" : "0");
-        } else if (cmd == "SET_TSTemp") {
-          tempThreshold = value;
-          saveSettings();
-          Serial.print("TSTEMP:");
-          Serial.println(tempThreshold);
-        } else if (cmd == "SET_TSTime") {
-          timeThreshold = value * 60000;  // Convert minutes to ms
-          saveSettings();
-          Serial.print("TSTOFF:");
-          Serial.println(value);
-        } else {
-          Serial.println("Unknown command");
-        }
-      } else {
-        Serial.println("Invalid command format");
-      }
-    }
-  }
-}
-// Function to output all status parameters via Serial
-void lastStatus() {
-  Serial.println("System Status:");
-  Serial.print("F1:");
-  Serial.println(digitalRead(F1_PIN));
-  Serial.print("F2:");
-  Serial.println(digitalRead(F2_PIN));
-  Serial.print("F3:");
-  Serial.println(digitalRead(F3_PIN));
-  Serial.print("F4:");
-  Serial.println(digitalRead(F4_PIN));
-  Serial.print("IGN:");
-  Serial.println(digitalRead(IGN_PIN));
-  Serial.print("TEMP:");
-  Serial.println(currentTemp, 2);
-  Serial.print("BAT:");
-  Serial.println(batteryVoltage, 2);
-  Serial.print("CH1:");
-  Serial.println(channelStates[0] ? "1" : "0");
-  Serial.print("CH2:");
-  Serial.println(channelStates[1] ? "1" : "0");
-  Serial.print("CH3:");
-  Serial.println(channelStates[2] ? "1" : "0");
-  Serial.print("CH4:");
-  Serial.println(channelStates[3] ? "1" : "0");
-  Serial.print("RELAY:");
-  Serial.println(RelayFlag ? "1" : "0");
-  Serial.print("TEMP_THRESH:");
-  Serial.println(tempThreshold);
-  Serial.print("TIME_THRESH_MIN:");
-  Serial.println(timeThreshold / 60000.0);
 }
