@@ -42,7 +42,7 @@
 #define RELAY_DELAY 50          // 50ms after relay on
 #define TEMP_CHECK_INTERVAL 1000 // Temperature check interval (1 second)
 #define DEBOUNCE_DELAY 150      // Debounce period (ms)
-#define MAX_VP_RESETS 4         // Maximum number of VP reset attempts
+#define MAX_VP_RESETS 3        // Maximum number of VP reset attempts
 
 // Default Values
 #define DEFAULT_TEMP_THRESHOLD 65.0f  // Default temperature threshold (°C)

@@ -21,7 +21,7 @@ PDUController::PDUController()
     , currentTemp(0.0f)
     , tempThreshold(DEFAULT_TEMP_THRESHOLD)
     , timeThreshold(DEFAULT_TIME_THRESHOLD)
-    , vpResetAttempts(0)
+    , vpResetAttempts(1)
     , batteryVoltage(0.0f)
     , ignLowStartTime(0)
     , lastTempCheckTime(0)
@@ -141,7 +141,16 @@ void PDUController::handleVPFault() {
     // VP_PIN fault handling for CH1 only
     if (!currentCh1Pin) {  // If CH1 is ON (LOW)
         if (currentVpPin == HIGH) {  // Fault detected
-            if (!faultHandlingInProgress && vpResetAttempts < MAX_VP_RESETS) {
+            // If we've reached max attempts, permanently disable CH1
+            if (vpResetAttempts > MAX_VP_RESETS) {
+                Serial.println("CRITICAL: Maximum reset attempts reached!");
+                // Permanent shutdown of CH1
+                setChannel(1, false);
+                Serial.println("VP fault: Maximum reset attempts reached. CH1 locked and saved to flash memory.");
+                Serial.println("Manual intervention required to reset CH1");
+                saveSettings();
+            }
+            if (!faultHandlingInProgress && vpResetAttempts <= MAX_VP_RESETS) {
                 faultHandlingInProgress = true;
                 Serial.println("FAULT DETECTED: VP_PIN is HIGH while CH1 is ON");
                 
@@ -163,15 +172,6 @@ void PDUController::handleVPFault() {
                 faultHandlingInProgress = false;
             }
             
-            // If we've reached max attempts, permanently disable CH1
-            if (vpResetAttempts >= MAX_VP_RESETS) {
-                Serial.println("CRITICAL: Maximum reset attempts reached!");
-                // Permanent shutdown of CH1
-                setChannel(1, false);
-                Serial.println("VP fault: Maximum reset attempts reached. CH1 locked and saved to flash memory.");
-                Serial.println("Manual intervention required to reset CH1");
-                saveSettings();
-            }
         } else {
             // If CH1 is ON but VP_PIN is LOW (normal operation)
             if (millis() - lastNormalOpTime >= 50000) {  // Print every 50 seconds during normal operation
